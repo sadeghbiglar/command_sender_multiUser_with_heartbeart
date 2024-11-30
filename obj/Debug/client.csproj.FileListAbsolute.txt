@@ -1,0 +1,14 @@
+C:\Users\it2.SHABAKE\Desktop\sc\client\bin\Debug\client.exe.config
+C:\Users\it2.SHABAKE\Desktop\sc\client\bin\Debug\client.exe
+C:\Users\it2.SHABAKE\Desktop\sc\client\bin\Debug\client.pdb
+C:\Users\it2.SHABAKE\Desktop\sc\client\obj\Debug\client.csprojAssemblyReference.cache
+C:\Users\it2.SHABAKE\Desktop\sc\client\obj\Debug\client.csproj.CoreCompileInputs.cache
+C:\Users\it2.SHABAKE\Desktop\sc\client\obj\Debug\client.exe
+C:\Users\it2.SHABAKE\Desktop\sc\client\obj\Debug\client.pdb
+C:\Users\sadeghbiglar\Desktop\sc\client\bin\Debug\client.exe.config
+C:\Users\sadeghbiglar\Desktop\sc\client\bin\Debug\client.exe
+C:\Users\sadeghbiglar\Desktop\sc\client\bin\Debug\client.pdb
+C:\Users\sadeghbiglar\Desktop\sc\client\obj\Debug\client.csproj.AssemblyReference.cache
+C:\Users\sadeghbiglar\Desktop\sc\client\obj\Debug\client.csproj.CoreCompileInputs.cache
+C:\Users\sadeghbiglar\Desktop\sc\client\obj\Debug\client.exe
+C:\Users\sadeghbiglar\Desktop\sc\client\obj\Debug\client.pdb
