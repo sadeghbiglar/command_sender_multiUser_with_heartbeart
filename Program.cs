@@ -1,11 +1,14 @@
 ﻿using System;
 using System.Collections.Generic;
+using System.Data.SqlClient;
 using System.IO;
+using System.Linq;
 using System.Net;
+using System.Net.NetworkInformation;
 using System.Net.Sockets;
 using System.Text;
 using System.Threading;
-
+using MySql.Data.MySqlClient;
 namespace RemoteController
 {
     
@@ -17,6 +20,7 @@ namespace RemoteController
         public const int cport = 5001;
         public const int fport = 5002;
         static HttpListener listener;
+        private static readonly string connectionString = "Server=localhost;Database=clientsdb;User ID=root;Password=;";
         static void Main(string[] args)
         {
             Thread menuThread = new Thread(ShowMenu);
@@ -122,18 +126,37 @@ namespace RemoteController
                         TcpClient client = listener1.AcceptTcpClient();
                         string clientEndpoint = client.Client.RemoteEndPoint.ToString();
                         string clientIp = ((IPEndPoint)client.Client.RemoteEndPoint).Address.ToString();
-
+                        string client_name = "";
+                        
                         using (NetworkStream stream = client.GetStream())
                         using (StreamReader reader = new StreamReader(stream, Encoding.UTF8))
                         {
                             string initialMessage = reader.ReadLine();
                             if (initialMessage.StartsWith("register"))
                             {
+                                if (initialMessage.Contains(':') && initialMessage.Split(':').Length > 1)
+                                {
+                                    client_name = initialMessage.Split(':')[1];
+                                }
+                                else
+                                {
+                                    client_name = "noName";
+                                }
                                 Console.WriteLine($"\nRegister message from client {clientIp}: {initialMessage}");
+                                RegisterOrUpdateClient(client_name,clientIp);
                             }
                             else if (initialMessage.StartsWith("heartbeat"))
                             {
+                                if (initialMessage.Contains(':') && initialMessage.Split(':').Length > 1)
+                                {
+                                    client_name = initialMessage.Split(':')[1];
+                                }
+                                else
+                                {
+                                    client_name = "noName";
+                                }
                                 Console.WriteLine($"\nHeartbeat message from client {clientIp}: {initialMessage}");
+                                UpdateClientStatus(client_name);
                             }
                         }
 
@@ -312,7 +335,53 @@ namespace RemoteController
                 Console.Write(new string('-', progressBarWidth - filledBars));
                 Console.Write($"] {percentage:P0}");
             }
+             void RegisterOrUpdateClient(string clientName, string clientIP)
+            {
+                using (var connection = new MySqlConnection(connectionString))
+                {
+                    connection.Open();
 
+                    // بررسی وجود کلاینت در دیتابیس
+                    string checkQuery = "SELECT COUNT(*) FROM clients WHERE client_name = @clientName";
+                    MySqlCommand checkCmd = new MySqlCommand(checkQuery, connection);
+                    checkCmd.Parameters.AddWithValue("@clientName", clientName);
+                    int clientCount = Convert.ToInt32(checkCmd.ExecuteScalar());
+
+                    if (clientCount > 0)
+                    {
+                        // به‌روزرسانی رکورد موجود
+                        string updateQuery = "UPDATE clients SET last_seen = @lastSeen, ip_address = @ip, status = 'online' WHERE client_name = @clientName";
+                        MySqlCommand updateCmd = new MySqlCommand(updateQuery, connection);
+                        updateCmd.Parameters.AddWithValue("@lastSeen", DateTime.Now);
+                        updateCmd.Parameters.AddWithValue("@ip", clientIP);
+                        updateCmd.Parameters.AddWithValue("@clientName", clientName);
+                        updateCmd.ExecuteNonQuery();
+                    }
+                    else
+                    {
+                        // درج رکورد جدید
+                        string insertQuery = "INSERT INTO clients (client_name, ip_address, status, last_seen) VALUES (@clientName, @ip, 'online', @lastSeen)";
+                        MySqlCommand insertCmd = new MySqlCommand(insertQuery, connection);
+                        insertCmd.Parameters.AddWithValue("@clientName", clientName);
+                        insertCmd.Parameters.AddWithValue("@ip", clientIP);
+                        insertCmd.Parameters.AddWithValue("@lastSeen", DateTime.Now);
+                        insertCmd.ExecuteNonQuery();
+                    }
+                }
+            }
+
+             void UpdateClientStatus(string clientName)
+            {
+                using (var connection = new MySqlConnection(connectionString))
+                {
+                    connection.Open();
+                    string updateQuery = "UPDATE clients SET last_seen = @lastSeen, status = 'online' WHERE client_name = @clientName";
+                    MySqlCommand updateCmd = new MySqlCommand(updateQuery, connection);
+                    updateCmd.Parameters.AddWithValue("@lastSeen", DateTime.Now);
+                    updateCmd.Parameters.AddWithValue("@clientName", clientName);
+                    updateCmd.ExecuteNonQuery();
+                }
+            }
 
         }
     }
