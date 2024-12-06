@@ -21,6 +21,8 @@ namespace RemoteController
         public const int fport = 5002;
         static HttpListener listener;
         private static readonly string connectionString = "Server=localhost;Database=clientsdb;User ID=root;Password=;";
+        private static Dictionary<string, TcpClient> clients = new Dictionary<string, TcpClient>();
+
         static void Main(string[] args)
         {
             Thread menuThread = new Thread(ShowMenu);
@@ -73,46 +75,103 @@ namespace RemoteController
                     }
                 }
             }
-            
             void SendCommand()
             {
                 while (true)
                 {
                     try
                     {
-                        // دریافت آدرس IP سرور
-                        Console.WriteLine("\nEnter the server IP address (or 'exit' to quit):");
-                        string serverIp = Console.ReadLine();
-                        if (serverIp?.ToLower() == "exit") break;
+                        // دریافت نام کلاینت هدف
+                        Console.WriteLine("\nEnter the client name (or 'exit' to quit):");
+                        string clientName = Console.ReadLine();
+                        if (clientName?.ToLower() == "exit") break;
 
                         // دریافت دستور از کاربر
-                        Console.WriteLine("\nEnter the command to execute on the server:");
-                        string command = Console.ReadLine();
+                        Console.WriteLine("\nEnter the command to execute on the client:");
+                        string command ="";
+                        command = Console.ReadLine();
                         if (command?.ToLower() == "exit") break;
 
-                        // اتصال به سرور و ارسال دستور
-                        using (TcpClient client = new TcpClient(serverIp, cport))
-                        using (NetworkStream stream = client.GetStream())
-                        using (StreamWriter writer = new StreamWriter(stream, Encoding.UTF8) { AutoFlush = true })
-                        using (StreamReader reader = new StreamReader(stream, Encoding.UTF8))
-                        {
-                            // ارسال دستور به سرور
-                            writer.WriteLine(command);
-                            Console.WriteLine("\nCommand sent. Waiting for response...");
-
-                            // دریافت نتیجه از سرور
-                            string result = reader.ReadToEnd();
-                            Console.WriteLine($"Result from server:\n{result}");
-                        }
+                        // ارسال کامند به کلاینت هدف
+                        SendMessageToClient(clientName, command);
                     }
                     catch (Exception ex)
                     {
                         Console.WriteLine($"Error: {ex.Message}");
                     }
                 }
-                Thread.Sleep(1000); // شبیه‌سازی تأخیر
 
+                Thread.Sleep(1000); // شبیه‌سازی تأخیر
             }
+            void SendMessageToClient(string clientName, string command)
+            {
+                lock (clients)
+                {
+                    if (clients.ContainsKey(clientName))
+                    {
+                        try
+                        {
+                            TcpClient client = clients[clientName];
+                            if (client.Connected)
+                            {
+                                NetworkStream stream = client.GetStream();
+                                StreamWriter writer = new StreamWriter(stream, Encoding.UTF8) { AutoFlush = true };
+                                StreamReader reader = new StreamReader(stream, Encoding.UTF8);
+
+                                // ارسال دستور
+                                writer.WriteLine($"cmd:{command}");
+                                Console.WriteLine("\nCommand sent. Waiting for response...");
+
+                                // دریافت نتیجه
+                                string message;
+                                bool isResult = false;
+
+                                while ((message = reader.ReadLine()) != null)
+                                {
+                                    if (message.StartsWith("result:"))
+                                    {
+                                        string resultLine = message.Substring(7);
+                                        if (!isResult)
+                                        {
+                                            Console.WriteLine($"\nResult from client {clientName}:");
+                                            isResult = true; // مشخص کردن اینکه پیام نتیجه شروع شده است
+                                        }
+                                        Console.WriteLine(resultLine);
+                                    }
+                                    else if (message == "endresult")
+                                    {
+                                        Console.WriteLine("\nEnd of result.");
+                                        isResult = false; // ریست کردن وضعیت برای دستور بعدی
+                                        message = "";
+                                        break; // پایان دریافت نتیجه
+                                    }
+                                    else if (message.StartsWith("heartbeat:"))
+                                    {
+                                        Console.WriteLine($"Heartbeat from client {clientName}: {message.Substring(10)}");
+                                    }
+                                    else
+                                    {
+                                        Console.WriteLine($"Unknown message from client {clientName}: {message}");
+                                    }
+                                }
+                            }
+                            else
+                            {
+                                Console.WriteLine($"Client {clientName} is not connected.");
+                            }
+                        }
+                        catch (Exception ex)
+                        {
+                            Console.WriteLine($"Error sending command to {clientName}: {ex.Message}");
+                        }
+                    }
+                    else
+                    {
+                        Console.WriteLine($"Client {clientName} not found in dictionary.");
+                    }
+                }
+            }
+
             Thread thread1 = new Thread(() =>
             {
                 TcpListener listener1 = new TcpListener(IPAddress.Any, port);
@@ -127,40 +186,58 @@ namespace RemoteController
                         string clientEndpoint = client.Client.RemoteEndPoint.ToString();
                         string clientIp = ((IPEndPoint)client.Client.RemoteEndPoint).Address.ToString();
                         string client_name = "";
-                        
-                        using (NetworkStream stream = client.GetStream())
-                        using (StreamReader reader = new StreamReader(stream, Encoding.UTF8))
+
+                        NetworkStream stream = client.GetStream();
+                        StreamReader reader = new StreamReader(stream, Encoding.UTF8);
+
+                        // خواندن پیام‌ها در یک حلقه
+                        while (client.Connected)
                         {
-                            string initialMessage = reader.ReadLine();
-                            if (initialMessage.StartsWith("register"))
+                            try
                             {
-                                if (initialMessage.Contains(':') && initialMessage.Split(':').Length > 1)
+                                string message = reader.ReadLine();
+                                if (message == null) break; // اتصال قطع شده است
+
+                                if (message.StartsWith("register"))
                                 {
-                                    client_name = initialMessage.Split(':')[1];
+                                    client_name = message.Split(':')[1];
+                                    Console.WriteLine($"\nRegister message from client {clientIp}: {message}");
+
+                                    // ذخیره کلاینت در دیکشنری
+                                    lock (clients)
+                                    {
+                                        if (!clients.ContainsKey(client_name))
+                                        {
+                                            clients[client_name] = client;
+                                            Console.WriteLine($"Client {client_name} added to dictionary.");
+                                        }
+                                    }
+                                }
+                                else if (message.StartsWith("heartbeat"))
+                                {
+                                    client_name = message.Split(':')[1];
+                                    Console.WriteLine($"\nHeartbeat message from client {clientIp}: {message}");
+
+                                    // بروزرسانی وضعیت کلاینت در دیکشنری
+                                    lock (clients)
+                                    {
+                                        if (clients.ContainsKey(client_name))
+                                        {
+                                            clients[client_name] = client;
+                                        }
+                                    }
                                 }
                                 else
                                 {
-                                    client_name = "noName";
+                                    Console.WriteLine($"Unknown message from client {clientIp}: {message}");
                                 }
-                                Console.WriteLine($"\nRegister message from client {clientIp}: {initialMessage}");
-                                RegisterOrUpdateClient(client_name,clientIp);
                             }
-                            else if (initialMessage.StartsWith("heartbeat"))
+                            catch (Exception ex)
                             {
-                                if (initialMessage.Contains(':') && initialMessage.Split(':').Length > 1)
-                                {
-                                    client_name = initialMessage.Split(':')[1];
-                                }
-                                else
-                                {
-                                    client_name = "noName";
-                                }
-                                Console.WriteLine($"\nHeartbeat message from client {clientIp}: {initialMessage}");
-                                UpdateClientStatus(client_name);
+                                Console.WriteLine($"Error while reading message: {ex.Message}");
+                                break;
                             }
                         }
-
-                        client.Close(); // سوکت را پس از پردازش ببندید
                     }
                     catch (Exception ex)
                     {
