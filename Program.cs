@@ -6,9 +6,12 @@ using System.Linq;
 using System.Net;
 using System.Net.NetworkInformation;
 using System.Net.Sockets;
+using System.Security.Cryptography;
 using System.Text;
 using System.Threading;
 using MySql.Data.MySqlClient;
+using System.IdentityModel.Tokens.Jwt;
+using Microsoft.IdentityModel.Tokens;
 namespace RemoteController
 {
     
@@ -22,6 +25,7 @@ namespace RemoteController
         static HttpListener listener;
         private static readonly string connectionString = "Server=localhost;Database=clientsdb;User ID=root;Password=;";
         private static Dictionary<string, TcpClient> clients = new Dictionary<string, TcpClient>();
+       private static string secretKey = "this-is-a-very-secure-and-long-key-1234567890";
 
         static void Main(string[] args)
         {
@@ -75,6 +79,14 @@ namespace RemoteController
                     }
                 }
             }
+             string GenerateHmac(string message, string secretKey)
+            {
+                using (var hmac = new HMACSHA256(Encoding.UTF8.GetBytes(secretKey)))
+                {
+                    byte[] hashBytes = hmac.ComputeHash(Encoding.UTF8.GetBytes(message));
+                    return Convert.ToBase64String(hashBytes); // بازگشت رشته رمزگذاری‌شده
+                }
+            }
             void SendCommand()
             {
                 while (true)
@@ -118,8 +130,11 @@ namespace RemoteController
                                 StreamWriter writer = new StreamWriter(stream, Encoding.UTF8) { AutoFlush = true };
                                 StreamReader reader = new StreamReader(stream, Encoding.UTF8);
 
+                                // تولید JWT
+                                string jwt = GenerateJwt(command);
+
                                 // ارسال دستور
-                                writer.WriteLine($"cmd:{command}");
+                                writer.WriteLine($"cmd:{jwt}");
                                 Console.WriteLine("\nCommand sent. Waiting for response...");
 
                                 // دریافت نتیجه
@@ -134,16 +149,15 @@ namespace RemoteController
                                         if (!isResult)
                                         {
                                             Console.WriteLine($"\nResult from client {clientName}:");
-                                            isResult = true; // مشخص کردن اینکه پیام نتیجه شروع شده است
+                                            isResult = true;
                                         }
                                         Console.WriteLine(resultLine);
                                     }
                                     else if (message == "endresult")
                                     {
                                         Console.WriteLine("\nEnd of result.");
-                                        isResult = false; // ریست کردن وضعیت برای دستور بعدی
-                                        message = "";
-                                        break; // پایان دریافت نتیجه
+                                        isResult = false;
+                                        break;
                                     }
                                     else if (message.StartsWith("heartbeat:"))
                                     {
@@ -171,6 +185,28 @@ namespace RemoteController
                     }
                 }
             }
+
+            string GenerateJwt(string command)
+            {
+                var securityKey = new SymmetricSecurityKey(Encoding.UTF8.GetBytes(secretKey));
+                var credentials = new SigningCredentials(securityKey, SecurityAlgorithms.HmacSha256);
+
+                var tokenHandler = new JwtSecurityTokenHandler();
+                var tokenDescriptor = new SecurityTokenDescriptor
+                {
+                    Subject = new System.Security.Claims.ClaimsIdentity(new[]
+                    {
+                new System.Security.Claims.Claim("command", command)
+            }),
+                    Expires = DateTime.UtcNow.AddMinutes(10),
+                    SigningCredentials = credentials
+                };
+
+                var token = tokenHandler.CreateToken(tokenDescriptor);
+                return tokenHandler.WriteToken(token);
+            }
+
+           
 
             Thread thread1 = new Thread(() =>
             {
