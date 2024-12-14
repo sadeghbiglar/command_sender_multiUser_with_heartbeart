@@ -8,11 +8,12 @@ using System.Net.NetworkInformation;
 using System.Net.Sockets;
 using System.Text;
 using System.Threading;
+using System.Threading.Tasks;
 using MySql.Data.MySqlClient;
 namespace RemoteController
 {
-    
-    
+
+
     class Program
     {
         public static bool flag = false;
@@ -27,7 +28,7 @@ namespace RemoteController
         {
             Thread menuThread = new Thread(ShowMenu);
             menuThread.Start();
-           // StartApi();
+            // StartApi();
             void ShowMenu()
             {
                 while (true)
@@ -45,20 +46,19 @@ namespace RemoteController
                     {
                         case "1":
                             //  ListClients();
-                        // دریافت آدرس IP سرور
-                        Console.WriteLine("\nEnter the server IP address (or 'exit' to quit):");
-                        string serverIp = Console.ReadLine();
-                        if (serverIp?.ToLower() == "exit") break;
-
-                        // دریافت آدرس فایل از کاربر
-                        Console.WriteLine("\nEnter the filepath want to send:");
-                        string filepath = Console.ReadLine();
-                        if (filepath?.ToLower() == "exit") break;
-                         // دریافت مسیر مقصد فایل از کاربر
-                        Console.WriteLine("\nEnter the destinationpath to save file:");
-                        string destinationpath = Console.ReadLine();
-                        if (destinationpath?.ToLower() == "exit") break;
-                            SendFileWithProgress(serverIp, 5002,filepath, destinationpath);
+                            // دریافت نام کلاینت هدف
+                            Console.WriteLine("\nEnter the client name (or 'exit' to quit):");
+                            string clientName = Console.ReadLine();
+                            if (clientName?.ToLower() == "exit") break;
+                            // دریافت آدرس فایل از کاربر
+                            Console.WriteLine("\nEnter the filepath want to send:");
+                            string filepath = Console.ReadLine();
+                            if (filepath?.ToLower() == "exit") break;
+                            // دریافت مسیر مقصد فایل از کاربر
+                            Console.WriteLine("\nEnter the destinationpath to save file:");
+                            string destinationpath = Console.ReadLine();
+                            if (destinationpath?.ToLower() == "exit") break;
+                            SendFileWithProgress(clientName, filepath, destinationpath);
                             break;
                         case "2":
                             //  ShowOnlineClients();
@@ -88,7 +88,7 @@ namespace RemoteController
 
                         // دریافت دستور از کاربر
                         Console.WriteLine("\nEnter the command to execute on the client:");
-                        string command ="";
+                        string command = "";
                         command = Console.ReadLine();
                         if (command?.ToLower() == "exit") break;
 
@@ -361,42 +361,70 @@ namespace RemoteController
                     Console.WriteLine("Listener stopped on exit.");
                 }
             };
-            void SendFileWithProgress(string serverIp, int port, string filePath, string destinationPath)
+            void SendFileWithProgress(string clientName, string filePath, string destinationPath)
             {
-                try
+                lock (clients)
                 {
-                    using (TcpClient client = new TcpClient(serverIp, fport))
-                    using (NetworkStream stream = client.GetStream())
-                    using (BinaryWriter writer = new BinaryWriter(stream))
-                    using (FileStream fs = new FileStream(filePath, FileMode.Open, FileAccess.Read))
+                    if (clients.ContainsKey(clientName))
                     {
-                        string fileName = Path.GetFileName(filePath);
-                        writer.Write(fileName); // ارسال نام فایل
-                        writer.Write(destinationPath); // ارسال مسیر مقصد
-                        writer.Write(fs.Length); // ارسال طول فایل
-
-                        byte[] buffer = new byte[8192];
-                        int bytesRead;
-                        long totalBytesRead = 0;
-                        long fileSize = fs.Length;
-
-                        Console.WriteLine($"Sending file: {fileName} ({fileSize} bytes)");
-
-                        while ((bytesRead = fs.Read(buffer, 0, buffer.Length)) > 0)
+                        try
                         {
-                            writer.Write(buffer, 0, bytesRead);
-                            totalBytesRead += bytesRead;
+                            TcpClient client = clients[clientName];
+                            if (client.Connected)
+                            {
+                                NetworkStream stream = client.GetStream();
 
-                            // نمایش پراگرس بار
-                            ShowProgress(totalBytesRead, fileSize);
+                                BinaryWriter writer = new BinaryWriter(stream);
+                                StreamWriter swriter = new StreamWriter(stream, Encoding.UTF8) { AutoFlush = true };
+                                swriter.WriteLine($"file:{clientName}");
+                                Thread.Sleep(1000);
+                                try
+                                {
+                                   
+                                    
+                                    using (FileStream fs = new FileStream(filePath, FileMode.Open, FileAccess.Read))
+                                    {
+                                        Thread.Sleep(7000);
+                                        string fileName = Path.GetFileName(filePath);
+                                        writer.Write(fileName); // ارسال نام فایل
+                                        writer.Write(destinationPath); // ارسال مسیر مقصد
+                                        writer.Write(fs.Length); // ارسال طول فایل
+
+                                        byte[] buffer = new byte[8192];
+                                        int bytesRead;
+                                        long totalBytesRead = 0;
+                                        long fileSize = fs.Length;
+
+                                        Console.WriteLine($"Sending file: {fileName} ({fileSize} bytes)");
+
+                                        while ((bytesRead = fs.Read(buffer, 0, buffer.Length)) > 0)
+                                        {
+                                            writer.Write(buffer, 0, bytesRead);
+                                            totalBytesRead += bytesRead;
+
+                                            // نمایش پراگرس بار
+                                            ShowProgress(totalBytesRead, fileSize);
+                                        }
+
+                                        Console.WriteLine("\nFile sent successfully.");
+                                    }
+                                }
+                                catch (Exception ex)
+                                {
+                                    Console.WriteLine($"Error sending file: {ex.Message}");
+                                }
+                            }
+                            else
+                            {
+                                Console.WriteLine($"Client {clientName} not found in dictionary.");
+                            }
+                        }
+                        catch (Exception ex)
+                        {
+                            Console.WriteLine($"Error sending file to {clientName}: {ex.Message}");
                         }
 
-                        Console.WriteLine("\nFile sent successfully.");
                     }
-                }
-                catch (Exception ex)
-                {
-                    Console.WriteLine($"Error sending file: {ex.Message}");
                 }
             }
 
@@ -412,7 +440,7 @@ namespace RemoteController
                 Console.Write(new string('-', progressBarWidth - filledBars));
                 Console.Write($"] {percentage:P0}");
             }
-             void RegisterOrUpdateClient(string clientName, string clientIP)
+            void RegisterOrUpdateClient(string clientName, string clientIP)
             {
                 using (var connection = new MySqlConnection(connectionString))
                 {
@@ -447,7 +475,7 @@ namespace RemoteController
                 }
             }
 
-             void UpdateClientStatus(string clientName)
+            void UpdateClientStatus(string clientName)
             {
                 using (var connection = new MySqlConnection(connectionString))
                 {
