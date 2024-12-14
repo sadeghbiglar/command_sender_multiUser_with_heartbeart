@@ -10,6 +10,7 @@ using System.Text;
 using System.Threading;
 using System.Threading.Tasks;
 using MySql.Data.MySqlClient;
+using MySqlX.XDevAPI.Common;
 namespace RemoteController
 {
 
@@ -103,7 +104,7 @@ namespace RemoteController
 
                 Thread.Sleep(1000); // شبیه‌سازی تأخیر
             }
-            void SendMessageToClient(string clientName, string command)
+            string SendMessageToClient(string clientName, string command)
             {
                 lock (clients)
                 {
@@ -124,53 +125,121 @@ namespace RemoteController
 
                                 // دریافت نتیجه
                                 string message;
-                                bool isResult = false;
+                                StringBuilder resultBuilder = new StringBuilder(); // برای ذخیره نتیجه
 
                                 while ((message = reader.ReadLine()) != null)
                                 {
                                     if (message.StartsWith("result:"))
                                     {
                                         string resultLine = message.Substring(7);
-                                        if (!isResult)
-                                        {
-                                            Console.WriteLine($"\nResult from client {clientName}:");
-                                            isResult = true; // مشخص کردن اینکه پیام نتیجه شروع شده است
-                                        }
-                                        Console.WriteLine(resultLine);
+                                        resultBuilder.AppendLine(resultLine); // ذخیره هر خط از نتیجه
+
+                                        Console.WriteLine(resultLine); // نمایش در کنسول (اختیاری)
                                     }
                                     else if (message == "endresult")
                                     {
                                         Console.WriteLine("\nEnd of result.");
-                                        isResult = false; // ریست کردن وضعیت برای دستور بعدی
-                                        message = "";
                                         break; // پایان دریافت نتیجه
-                                    }
-                                    else if (message.StartsWith("heartbeat:"))
-                                    {
-                                        Console.WriteLine($"Heartbeat from client {clientName}: {message.Substring(10)}");
                                     }
                                     else
                                     {
                                         Console.WriteLine($"Unknown message from client {clientName}: {message}");
                                     }
                                 }
+
+                                return resultBuilder.ToString(); // بازگرداندن نتیجه به عنوان یک رشته
                             }
                             else
                             {
                                 Console.WriteLine($"Client {clientName} is not connected.");
+                                return "Error: Client not connected.";
                             }
                         }
                         catch (Exception ex)
                         {
                             Console.WriteLine($"Error sending command to {clientName}: {ex.Message}");
+                            return $"Error: {ex.Message}";
                         }
                     }
                     else
                     {
                         Console.WriteLine($"Client {clientName} not found in dictionary.");
+                        return "Error: Client not found in dictionary.";
                     }
                 }
             }
+
+            //void SendMessageToClient(string clientName, string command)
+            //{
+            //    lock (clients)
+            //    {
+            //        if (clients.ContainsKey(clientName))
+            //        {
+            //            try
+            //            {
+            //                TcpClient client = clients[clientName];
+            //                if (client.Connected)
+            //                {
+            //                    NetworkStream stream = client.GetStream();
+            //                    StreamWriter writer = new StreamWriter(stream, Encoding.UTF8) { AutoFlush = true };
+            //                    StreamReader reader = new StreamReader(stream, Encoding.UTF8);
+
+            //                    // ارسال دستور
+            //                    writer.WriteLine($"cmd:{command}");
+            //                    Console.WriteLine("\nCommand sent. Waiting for response...");
+
+            //                    // دریافت نتیجه
+            //                    string message;
+            //                    bool isResult = false;
+
+            //                    while ((message = reader.ReadLine()) != null)
+            //                    {
+            //                        if (message.StartsWith("result:"))
+            //                        {
+            //                            string resultLine = message.Substring(7);
+            //                            if (!isResult)
+            //                            {
+            //                                Console.WriteLine($"\nResult from client {clientName}:");
+            //                                isResult = true; // مشخص کردن اینکه پیام نتیجه شروع شده است
+            //                            }
+            //                            Console.WriteLine(resultLine);
+            //                        }
+            //                        else if (message == "endresult")
+            //                        {
+            //                            Console.WriteLine("\nEnd of result.");
+            //                            isResult = false; // ریست کردن وضعیت برای دستور بعدی
+            //                            message = "";
+
+            //                            break; // پایان دریافت نتیجه
+
+            //                        }
+            //                        //else if (message.StartsWith("heartbeat:"))
+            //                        //{
+            //                        //    Console.WriteLine($"Heartbeat from client {clientName}: {message.Substring(10)}");
+            //                        //}
+            //                        else
+            //                        {
+            //                            Console.WriteLine($"Unknown message from client {clientName}: {message}");
+            //                        }
+            //                    }
+
+            //                }
+            //                else
+            //                {
+            //                    Console.WriteLine($"Client {clientName} is not connected.");
+            //                }
+            //            }
+            //            catch (Exception ex)
+            //            {
+            //                Console.WriteLine($"Error sending command to {clientName}: {ex.Message}");
+            //            }
+            //        }
+            //        else
+            //        {
+            //            Console.WriteLine($"Client {clientName} not found in dictionary.");
+            //        }
+            //    }
+            //}
 
             Thread thread1 = new Thread(() =>
             {
@@ -279,7 +348,7 @@ namespace RemoteController
                                     Console.WriteLine($"Received Command: {command} for IP: {serverIp}");
 
                                     // ارسال دستور به سرور
-                                    string result = SendCommandToServer(serverIp, command);
+                                    string result = SendMessageToClient(serverIp, command);
 
                                     // ارسال پاسخ به کلاینت
                                     byte[] buffer = Encoding.UTF8.GetBytes(result);
@@ -315,28 +384,7 @@ namespace RemoteController
                 }
             }
 
-            string SendCommandToServer(string serverIp, string command)
-            {
-                try
-                {
-                    using (TcpClient client = new TcpClient(serverIp, cport))
-                    using (NetworkStream stream = client.GetStream())
-                    using (StreamWriter writer = new StreamWriter(stream, Encoding.UTF8) { AutoFlush = true })
-                    using (StreamReader reader = new StreamReader(stream, Encoding.UTF8))
-                    {
-                        // ارسال دستور
-                        writer.WriteLine(command);
-
-                        // دریافت پاسخ
-                        string result = reader.ReadToEnd();
-                        return result ?? "No response from server.";
-                    }
-                }
-                catch (Exception ex)
-                {
-                    return $"Error communicating with server: {ex.Message}";
-                }
-            }
+            
 
             Dictionary<string, string> ParseBody(string body)
             {
