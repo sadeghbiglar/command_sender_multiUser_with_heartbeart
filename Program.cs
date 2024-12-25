@@ -13,6 +13,7 @@ using System.Threading.Tasks;
 using MySql.Data.MySqlClient;
 using MySqlX.XDevAPI;
 using MySqlX.XDevAPI.Common;
+using System.Collections.Concurrent;
 namespace RemoteController
 {
 
@@ -26,7 +27,13 @@ namespace RemoteController
         static HttpListener listener1;
         private static readonly string connectionString = "Server=localhost;Database=clientsdb;User ID=root;Password=;";
         private static Dictionary<string, TcpClient> clients = new Dictionary<string, TcpClient>();
-        public static string key = "-key-key-@-key-key-@-key-key-@##";
+        private static readonly string key = "YourSecureKey123";
+        public static bool isInputMode = false;
+        // صف برای پیام‌های Register و Heartbeat
+        private static ConcurrentQueue<string> messageQueue = new ConcurrentQueue<string>();
+
+        // صف برای پیام‌های مربوط به کامندها و فایل‌ها
+        private static ConcurrentQueue<string> commandQueue = new ConcurrentQueue<string>();
         static void Main(string[] args)
         {
             Thread menuThread = new Thread(ShowMenu);
@@ -48,28 +55,46 @@ namespace RemoteController
                     switch (choice)
                     {
                         case "1":
+                            isInputMode = true;
                             //  ListClients();
                             // دریافت نام کلاینت هدف
                             Console.WriteLine("\nEnter the client name (or 'exit' to quit):");
                             string clientName = Console.ReadLine();
-                            if (clientName?.ToLower() == "exit") break;
+                            if (clientName?.ToLower() == "exit")
+                            {
+                                isInputMode = false;
+                                break;
+                            }
+                               
                             // دریافت آدرس فایل از کاربر
                             Console.WriteLine("\nEnter the filepath want to send:");
                             string filepath = Console.ReadLine();
-                            if (filepath?.ToLower() == "exit") break;
+                            if (filepath?.ToLower() == "exit")
+                            {
+                                isInputMode = false;
+                                break;
+                            }
                             // دریافت مسیر مقصد فایل از کاربر
                             Console.WriteLine("\nEnter the destinationpath to save file:");
                             string destinationpath = Console.ReadLine();
-                            if (destinationpath?.ToLower() == "exit") break;
+                            if (destinationpath?.ToLower() == "exit")
+                            {
+                                isInputMode = false;
+                                break;
+                            }
+                            isInputMode = false;
                             SendFileWithProgress(clientName, filepath, destinationpath);
+
                             break;
                         case "2":
                             //  ShowOnlineClients();
                             break;
                         case "3":
+                            isInputMode = true;
                             SendCommand();
                             break;
                         case "4":
+                            isInputMode = false;
                             Environment.Exit(0);
                             break;
                         default:
@@ -87,13 +112,21 @@ namespace RemoteController
                         // دریافت نام کلاینت هدف
                         Console.WriteLine("\nEnter the client name (or 'exit' to quit):");
                         string clientName = Console.ReadLine();
-                        if (clientName?.ToLower() == "exit") break;
+                        if (clientName?.ToLower() == "exit")
+                        {
+                            isInputMode = false;
+                            break;
+                        }
 
                         // دریافت دستور از کاربر
                         Console.WriteLine("\nEnter the command to execute on the client:");
                         string command = "";
                         command = Console.ReadLine();
-                        if (command?.ToLower() == "exit") break;
+                        if (command?.ToLower() == "exit")
+                        {
+                            isInputMode = false;
+                            break;
+                        }
 
                         // ارسال کامند به کلاینت هدف
                         SendMessageToClient(clientName, command);
@@ -106,6 +139,59 @@ namespace RemoteController
 
                 Thread.Sleep(1000); // شبیه‌سازی تأخیر
             }
+            void AddMessageToQueue(string message)
+            {
+                lock (messageQueue)
+                {
+                    messageQueue.Enqueue(message); // پیام به صف اضافه می‌شود
+                   // Console.WriteLine($"Message added to queue: {message}");
+                }
+            }
+
+            void ProcessMessagesFromQueue()
+            {
+                while (true)
+                {
+                    lock (messageQueue)
+                    {
+                        if (messageQueue.TryDequeue(out string message))
+                        {
+                          //  Console.WriteLine($"Processing message: {message}");
+
+                            if (message.StartsWith("register"))
+                            {
+                                string clientName = message.Split(':')[1];
+                                if (!isInputMode)
+                                {
+                                    Console.WriteLine($"Registering client: {clientName}");
+                                }
+                               
+
+                              
+                            }
+                            else if (message.StartsWith("heartbeat"))
+                            {
+                                string clientName = message.Split(':')[1];
+                                if (!isInputMode)
+                                {
+                                    Console.WriteLine($"Heartbeat received from client: {clientName}");
+                                }
+                            }
+                            else
+                            {
+                                Console.WriteLine($"Unknown message type: {message}");
+                            }
+                        }
+                    }
+
+                    Thread.Sleep(10); // تأخیر کوچک برای بهینه‌سازی CPU
+                }
+            }
+
+
+
+
+
             string SendMessageToClient(string clientName, string command)
             {
                 lock (clients)
@@ -114,14 +200,17 @@ namespace RemoteController
                     {
                         try
                         {
+                           // NotifyServersBusy();
                             TcpClient client = clients[clientName];
                             if (client.Connected)
                             {
                                 NetworkStream stream = client.GetStream();
                                 StreamWriter writer = new StreamWriter(stream, Encoding.UTF8) { AutoFlush = true };
                                 StreamReader reader = new StreamReader(stream, Encoding.UTF8);
-                              
+
                                 // ارسال دستور
+                                Thread.Sleep(2000);
+                            
                                 writer.WriteLine($"cmd:{command}");
                                 Console.WriteLine("\nCommand sent. Waiting for response...");
 
@@ -141,6 +230,7 @@ namespace RemoteController
                                     else if (message == "endresult")
                                     {
                                         Console.WriteLine("\nEnd of result.");
+                                       
                                         break; // پایان دریافت نتیجه
                                     }
                                     else
@@ -170,8 +260,6 @@ namespace RemoteController
                     }
                 }
             }
-
-           
             Thread thread1 = new Thread(() =>
             {
                 TcpListener listener1 = new TcpListener(IPAddress.Any, port);
@@ -183,77 +271,125 @@ namespace RemoteController
                     try
                     {
                         TcpClient client = listener1.AcceptTcpClient();
-                        string clientEndpoint = client.Client.RemoteEndPoint.ToString();
                         string clientIp = ((IPEndPoint)client.Client.RemoteEndPoint).Address.ToString();
-                        string client_name = "";
+                        Console.WriteLine($"New connection from {clientIp}");
 
-                        NetworkStream stream = client.GetStream();
-                        StreamReader reader = new StreamReader(stream, Encoding.UTF8);
-
-                        // خواندن پیام‌ها در یک حلقه
-                        while (client.Connected)
-                        {
-                            try
-                            {
-                                reader.DiscardBufferedData();
-
-                                string message = reader.ReadLine();
-                                if (message == null) break; // اتصال قطع شده است
-                                stream.Flush();
-                                if (message.StartsWith("register"))
-                                {
-                                    client_name = message.Split(':')[1];
-                                    Console.WriteLine($"\nRegister message from client {clientIp}: {message}");
-                                    stream.Flush();
-                                    reader.DiscardBufferedData();
-
-                                    // ذخیره کلاینت در دیکشنری
-                                    lock (clients)
-                                    {
-                                        if (!clients.ContainsKey(client_name))
-                                        {
-                                            clients[client_name] = client;
-                                            Console.WriteLine($"Client {client_name} added to dictionary.");
-                                            stream.Flush();
-                                        }
-                                    }
-                                }
-                                else if (message.StartsWith("heartbeat"))
-                                {
-                                    client_name = message.Split(':')[1];
-                                    Console.WriteLine($"\nHeartbeat message from client {clientIp}: {message}");
-                                    stream.Flush();
-                                    reader.DiscardBufferedData();
-
-                                    // بروزرسانی وضعیت کلاینت در دیکشنری
-                                    lock (clients)
-                                    {
-                                        if (clients.ContainsKey(client_name))
-                                        {
-                                            clients[client_name] = client;
-                                        }
-                                    }
-                                }
-                                else
-                                {
-                                    Console.WriteLine($"Unknown message from client {clientIp}: {message}");
-                                }
-                            }
-                            catch (Exception ex)
-                            {
-                                Console.WriteLine($"Error while reading message: {ex.Message}");
-                                break;
-                            }
-                        }
+                        // ایجاد یک ترد جدید برای مدیریت این کلاینت
+                        Thread clientThread = new Thread(() => HandleClient(client));
+                        clientThread.IsBackground = true;
+                        clientThread.Start();
                     }
                     catch (Exception ex)
                     {
-                        Console.WriteLine($"Error in Thread1: {ex.Message}");
+                        Console.WriteLine($"Error in main listener thread: {ex.Message}");
                     }
                 }
             });
 
+
+            void HandleClient(TcpClient client)
+            {
+                string clientEndpoint = client.Client.RemoteEndPoint.ToString();
+                string clientName = "";
+                Console.WriteLine($"Handling client: {clientEndpoint}");
+
+                try
+                {
+                    NetworkStream stream = client.GetStream();
+                    StreamReader reader = new StreamReader(stream, Encoding.UTF8);
+
+                    while (client.Connected)
+                    {
+                        try
+                        {
+                            string message = reader.ReadLine();
+                            if (message == null) break; // اتصال قطع شده است
+                            if (string.IsNullOrEmpty(message)) continue;
+
+                            // بررسی صحت پیام
+                            if (IsValidMessage(message))
+                            {
+                                AddMessageToQueue(message);
+                            }
+                            else
+                            {
+                                Console.WriteLine($"Invalid message ignored: {message}");
+                            }
+
+                            if (message.StartsWith("register"))
+                            {
+                                 clientName = message.Split(':')[1];
+                                // ذخیره کلاینت در دیکشنری
+                                lock (clients)
+                                {
+                                    if (!clients.ContainsKey(clientName))
+                                    {
+                                        clients[clientName] = client;
+                                        Console.WriteLine($"Client {clientName} added to dictionary.");
+                                        stream.Flush();
+                                    }
+                                }
+
+                            }
+                            else if (message.StartsWith("heartbeat"))
+                            {
+                                 clientName = message.Split(':')[1];
+                                // بروزرسانی وضعیت کلاینت در دیکشنری
+                                lock (clients)
+                                {
+                                    if (clients.ContainsKey(clientName))
+                                    {
+                                        clients[clientName] = client;
+                                    }
+                                }
+                            }
+                          
+                         //   Console.WriteLine($"Message received from {clientEndpoint}: {message}");
+                        }
+                        catch (Exception ex)
+                        {
+                            Console.WriteLine($"Error while reading message from {clientEndpoint}: {ex.Message}");
+                            break;
+                        }
+                    }
+                }
+                catch (Exception ex)
+                {
+                    Console.WriteLine($"Error in client thread for {clientEndpoint}: {ex.Message}");
+                }
+                finally
+                {
+                    // حذف کلاینت از دیکشنری
+                    lock (clients)
+                    {
+                        if (!string.IsNullOrEmpty(clientName) && clients.ContainsKey(clientName))
+                        {
+                            clients.Remove(clientName);
+                            Console.WriteLine($"Client {clientName} removed from dictionary.");
+                        }
+                    }
+
+                    client.Close();
+                    Console.WriteLine($"Client {clientEndpoint} disconnected.");
+                }
+            }
+
+            bool IsValidMessage(string message)
+            {
+                return message.StartsWith("register") ||
+                       message.StartsWith("heartbeat") ||
+                       message.StartsWith("cmd") ||
+                       message.StartsWith("file");
+            }
+
+           
             thread1.Start();
+            Thread messageProcessorThread = new Thread(() =>
+            {
+                ProcessMessagesFromQueue(); // پردازش پیام‌ها از صف
+            });
+            messageProcessorThread.Start();
+
             void StartApi()
             {
                 listener1 = new HttpListener();
@@ -426,7 +562,7 @@ namespace RemoteController
                     }
                 }
             }
-
+           
             Dictionary<string, string> ParseBody(string body)
             {
                 var parameters = new Dictionary<string, string>();
@@ -442,48 +578,11 @@ namespace RemoteController
                 return parameters;
             }
 
-
-            //StartFileApi();
-            //StartApi();
-            //Task.Run(() => StartFileApi());
-
-            //Task.Run(() => StartApi());
-            //Thread fileApiThread = new Thread(StartFileApi);
-            //Thread apiThread = new Thread(StartApi);
-
-            //fileApiThread.Start();
-            //apiThread.Start();
             Task fileApiTask = Task.Run(() => StartFileApi());
             Task apiTask = Task.Run(() => StartApi());
 
             Task.WaitAll(fileApiTask, apiTask);
 
-            static string EncryptJwt(string jwt, string key)
-            {
-                byte[] keyBytes = Encoding.UTF8.GetBytes(key);
-                byte[] iv = new byte[16]; // IV باید 16 بایت باشد
-                using (var rng = new RNGCryptoServiceProvider())
-                {
-                    rng.GetBytes(iv); // تولید IV تصادفی
-                }
-
-                using (Aes aes = Aes.Create())
-                {
-                    aes.Key = keyBytes;
-                    aes.IV = iv;
-
-                    using (MemoryStream ms = new MemoryStream())
-                    {
-                        ms.Write(iv, 0, iv.Length); // ذخیره IV در ابتدای پیام
-                        using (CryptoStream cs = new CryptoStream(ms, aes.CreateEncryptor(), CryptoStreamMode.Write))
-                        using (StreamWriter writer = new StreamWriter(cs))
-                        {
-                            writer.Write(jwt);
-                        }
-
-                        return Convert.ToBase64String(ms.ToArray());
-                    }
-                } }
                 AppDomain.CurrentDomain.ProcessExit += (sender, e) =>
             {
                 if (listener != null)
@@ -492,72 +591,7 @@ namespace RemoteController
                     Console.WriteLine("Listener stopped on exit.");
                 }
             };
-            //void SendFileWithProgress(string clientName, string filePath, string destinationPath)
-            //{
-            //    lock (clients)
-            //    {
-            //        if (clients.ContainsKey(clientName))
-            //        {
-            //            try
-            //            {
-            //                TcpClient client = clients[clientName];
-            //                if (client.Connected)
-            //                {
-            //                    NetworkStream stream = client.GetStream();
-
-            //                    BinaryWriter writer = new BinaryWriter(stream);
-            //                    StreamWriter swriter = new StreamWriter(stream, Encoding.UTF8) { AutoFlush = true };
-            //                    swriter.WriteLine($"file:{clientName}");
-            //                    Thread.Sleep(1000);
-            //                    try
-            //                    {
-
-
-            //                        using (FileStream fs = new FileStream(filePath, FileMode.Open, FileAccess.Read))
-            //                        {
-            //                            Thread.Sleep(7000);
-            //                            string fileName = Path.GetFileName(filePath);
-            //                            writer.Write(fileName); // ارسال نام فایل
-            //                            writer.Write(destinationPath); // ارسال مسیر مقصد
-            //                            writer.Write(fs.Length); // ارسال طول فایل
-
-            //                            byte[] buffer = new byte[8192];
-            //                            int bytesRead;
-            //                            long totalBytesRead = 0;
-            //                            long fileSize = fs.Length;
-
-            //                            Console.WriteLine($"Sending file: {fileName} ({fileSize} bytes)");
-
-            //                            while ((bytesRead = fs.Read(buffer, 0, buffer.Length)) > 0)
-            //                            {
-            //                                writer.Write(buffer, 0, bytesRead);
-            //                                totalBytesRead += bytesRead;
-
-            //                                // نمایش پراگرس بار
-            //                                ShowProgress(totalBytesRead, fileSize);
-            //                            }
-
-            //                            Console.WriteLine("\nFile sent successfully.");
-            //                        }
-            //                    }
-            //                    catch (Exception ex)
-            //                    {
-            //                        Console.WriteLine($"Error sending file: {ex.Message}");
-            //                    }
-            //                }
-            //                else
-            //                {
-            //                    Console.WriteLine($"Client {clientName} not found in dictionary.");
-            //                }
-            //            }
-            //            catch (Exception ex)
-            //            {
-            //                Console.WriteLine($"Error sending file to {clientName}: {ex.Message}");
-            //            }
-
-            //        }
-            //    }
-            //}
+           
             string SendFileWithProgress(string clientName, string filePath, string destinationPath)
             {
                 lock (clients)
@@ -580,6 +614,7 @@ namespace RemoteController
                       
                         using (FileStream fs = new FileStream(filePath, FileMode.Open, FileAccess.Read))
                         {
+                            
                             // ارسال پیام file
                             swriter.WriteLine($"file:{clientName}");
                             Thread.Sleep(7000);
@@ -617,6 +652,7 @@ namespace RemoteController
                             Console.WriteLine("\nFile sent successfully.");
 
                             stream.Flush();
+                          
                             return $"successfully:File {fileName} sent  to {clientName}.";
 
                         }
