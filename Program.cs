@@ -20,6 +20,8 @@ namespace RemoteController
 
     class Program
     {
+        private static readonly string Key = "my-super-secret-key!"; // کلید 32 بایتی
+        private static readonly string IV = "my-init-vector-123";    // مقدار IV ثابت 16 بایتی
 
         public static bool flag = false;
         public const int port = 5000;
@@ -39,6 +41,22 @@ namespace RemoteController
             Thread menuThread = new Thread(ShowMenu);
             menuThread.Start();
             // StartApi();
+             static string Encrypt(string plainText)
+            {
+                using (Aes aes = Aes.Create())
+                {
+                    aes.Key = Encoding.UTF8.GetBytes(Key.PadRight(32).Substring(0, 32));
+                    aes.IV = Encoding.UTF8.GetBytes(IV.PadRight(16).Substring(0, 16));
+                    aes.Mode = CipherMode.CBC;
+
+                    using (ICryptoTransform encryptor = aes.CreateEncryptor(aes.Key, aes.IV))
+                    {
+                        byte[] plainBytes = Encoding.UTF8.GetBytes(plainText);
+                        byte[] cipherBytes = encryptor.TransformFinalBlock(plainBytes, 0, plainBytes.Length);
+                        return Convert.ToBase64String(cipherBytes);
+                    }
+                }
+            }
             void ShowMenu()
             {
                 while (true)
@@ -210,8 +228,8 @@ namespace RemoteController
 
                                 // ارسال دستور
                                 Thread.Sleep(2000);
-                            
-                                writer.WriteLine($"cmd:{command}");
+                                string encryptedMessage = Encrypt($"cmd:{command}");
+                                writer.WriteLine(encryptedMessage);
                                 Console.WriteLine("\nCommand sent. Waiting for response...");
 
                                 // دریافت نتیجه
@@ -366,6 +384,7 @@ namespace RemoteController
                         {
                             clients.Remove(clientName);
                             Console.WriteLine($"Client {clientName} removed from dictionary.");
+
                         }
                     }
 
@@ -603,7 +622,7 @@ namespace RemoteController
 
                     BinaryWriter writer = new BinaryWriter(stream);
                     StreamWriter swriter = new StreamWriter(stream, Encoding.UTF8) { AutoFlush = true };
-                    swriter.WriteLine($"file:{clientName}");
+                   // swriter.WriteLine($"file:{clientName}");
                     Thread.Sleep(1000);
                     try
                     {
@@ -614,9 +633,10 @@ namespace RemoteController
                       
                         using (FileStream fs = new FileStream(filePath, FileMode.Open, FileAccess.Read))
                         {
-                            
+                           
+                            string encryptedMessage = Encrypt($"file:{clientName}");
                             // ارسال پیام file
-                            swriter.WriteLine($"file:{clientName}");
+                            swriter.WriteLine(encryptedMessage);
                             Thread.Sleep(7000);
                             stream.Flush();
 
