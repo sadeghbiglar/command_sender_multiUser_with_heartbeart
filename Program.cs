@@ -345,6 +345,7 @@ namespace RemoteController
                                         clients[clientName] = client;
                                         Console.WriteLine($"Client {clientName} added to dictionary.");
                                         stream.Flush();
+                                        RegisterOrUpdateClient(clientName,clientEndpoint);
                                     }
                                 }
 
@@ -358,6 +359,7 @@ namespace RemoteController
                                     if (clients.ContainsKey(clientName))
                                     {
                                         clients[clientName] = client;
+                                        UpdateClientStatus(clientName);
                                     }
                                 }
                             }
